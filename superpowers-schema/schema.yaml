@@ -1,0 +1,1324 @@
+name: superpowers-schema
+version: 1
+description: >
+  Spec-driven workflow integrated with Superpowers skills, extended
+  with spec-superflow process features (execution-contract bridge,
+  bug investigation protocol, hotfix/tweak fast paths, state machine,
+  checkpoint protocol, verify decision point).
+  Requirements: Superpowers plugin installed, providing skills:
+  brainstorming, writing-plans, using-git-worktrees,
+  subagent-driven-development (transitively: test-driven-development,
+  requesting-code-review), systematic-debugging,
+  finishing-a-development-branch.
+  Requires OpenCode (this schema is opinionated toward OpenCode's
+  skill loader and command naming; other platforms are not supported).
+  The alternative executor (executing-plans) loses TDD and code-review
+  transitive activation, defeating Superpowers' value.
+  Each artifact / apply step verifies its required skills before
+  invoking and surfaces a clear error if any are missing.
+  Full flow: brainstorm → proposal → design → specs → tasks → plan
+  → execution-contract → [apply] → verify → retrospective.
+  Hotfix flow: brainstorm(mode=hotfix) → execution-contract(minimal)
+  → [apply] → verify(lightweight) → retrospective(skip ok).
+  Tweak flow: brainstorm(mode=tweak) → direct edit → verify(lightweight).
+  bug-investigation is a side-branch from apply when bugs are hit.
+  Apply phase uses git worktrees + subagent-driven-development
+  (brings TDD and code-review transitively) with checkpoint
+  annotations in tasks.md for session resilience across context
+  compression. execution-contract.md serves as the single approved
+  handoff artifact with Intent Lock for content-level stale detection.
+  Verify artifact includes DP-6 decision point for explicit failure
+  routing. State machine (8 states) is derived from artifact
+  completion: exploring (no brainstorm) → specifying (brainstorm done,
+  plan missing) → bridging (plan done, contract missing) →
+  approved-for-build (contract approved) → executing (apply in
+  progress) → debugging (bug-investigation open) → closing (verify
+  exists) → abandoned (user request).
+
+artifacts:
+  - id: brainstorm
+    generates: brainstorm.md
+    description: Collaborative design exploration using Superpowers brainstorming
+    template: brainstorm.md
+    instruction: |
+      PRECHECK — required skill availability:
+      Before invoking, confirm `brainstorming` appears in
+      your available skills list. If missing, STOP and inform the user
+      that the Superpowers plugin must be installed (or that they can
+      explicitly opt to write brainstorm.md manually using the template
+      below). Do NOT silently fall back.
+
+      WORKFLOW MODE DETECTION:
+      Before starting brainstorming, assess the change scope from the
+      user's description. Pick one mode:
+
+      - **Full** (default): the change involves new features, new
+        capabilities, architecture changes, breaking changes, or
+        anything touching >4 files. Walk the full artifact DAG:
+        brainstorm → proposal → design → specs → tasks → plan →
+        execution-contract → apply → verify → retrospective.
+
+      - **Hotfix** (≤4 files, no new modules, no API/schema changes,
+        has code logic changes but restores intended behavior): Skip
+        proposal, design, specs, tasks, plan. Go directly to
+        execution-contract artifact (hotfix mode — minimal contract
+        with just Intent Lock + Task List + Approval Gate). Still
+        requires user approval before apply.
+
+      - **Tweak** (≤4 files, config/docs only, no code logic
+        changes): This mode does NOT use the opsx artifact flow.
+        Write brainstorm.md with "> Workflow mode: Tweak — direct
+        edit, no opsx artifacts". Then STOP the opsx-propose loop
+        entirely — tell the user: "This change is small enough for
+        direct edit. Skip opsx. Make changes directly, verify with
+        `node --check` or `dotnet build`." The user makes changes
+        without any artifacts.
+
+      Decision rules:
+      - If unsure whether Hotfix or Full → upgrade to Full.
+      - If unsure whether Tweak or Hotfix → upgrade to Hotfix.
+      - Hotfix criteria: ≤4 files, no new modules, no API/schema
+        changes, has code logic changes. If any criterion fails → Full.
+      - Tweak criteria: ≤4 files, config/docs only, no code logic.
+        If any code logic changes → upgrade to Hotfix or Full.
+      - User can explicitly override: "this is a hotfix" or
+        "this is a tweak" or "use full workflow".
+
+      Record the chosen mode at the top of brainstorm.md:
+      > Workflow mode: Full | Hotfix | Tweak
+      (If Hotfix: skip the brainstorming skill invocation below — write
+      a minimal brainstorm.md with just the mode line and a one-sentence
+      description of the fix. The opsx-propose loop will continue to
+      execution-contract; proposal/design/specs/tasks/plan will
+      self-skip via their own mode PRECHECKs.)
+      (If Tweak: write a minimal brainstorm.md with the mode line, then
+      STOP the opsx-propose loop entirely. Do NOT create any other
+      artifacts. Tell the user to make changes directly.)
+
+      MANDATORY SKILL INVOCATION:
+      You MUST invoke the `skill` tool with name `brainstorming`
+      before writing brainstorm.md. Do NOT paraphrase the skill's
+      behavior from memory — the skill tool call loads the skill's
+      SKILL.md into your context, which is required for correct
+      brainstorming behavior AND produces a `skill-call` audit
+      marker that the ai-eval evaluation pipeline relies on to
+      detect that this skill was used. Skipping the skill tool
+      call = process violation (the marker won't appear in the
+      prompts archive and the cycle will be scored as if
+      brainstorming was never used).
+
+      Invoke the skill tool now: `skill` with name `brainstorming`.
+
+      IMPORTANT output redirection:
+      - Do NOT write to `docs/superpowers/specs/`. Instead, write the
+        brainstorming output directly to this change's `brainstorm.md`.
+      - brainstorm.md is a RAW CAPTURE — write the brainstorming
+        skill's full output as-is, without forcing any template
+        structure. The skill's natural output is typically a decision
+        log (background → decision chain Q1-Qn → design trade-offs),
+        but the format varies by conversation. Preserve the skill's
+        natural organization.
+      - Do NOT pre-fill design.md during this step. design.md is a
+        separate artifact that reorganizes brainstorm.md content into
+        structured sections (Context, Goals, Decisions, Risks,
+        Migration). That transformation happens in the design step.
+
+      The brainstorming skill will:
+      1. Explore project context
+      2. Ask clarifying questions (one at a time)
+      3. Propose 2-3 approaches with trade-offs
+      4. Present design sections for approval
+      5. Output the validated design
+    requires: []
+
+  - id: proposal
+    generates: proposal.md
+    description: Initial proposal document outlining the change
+    template: proposal.md
+    instruction: |
+      PRECHECK — workflow mode:
+      Read brainstorm.md. Look for "> Workflow mode:" line.
+      - If "Hotfix" or "Tweak": write a one-line placeholder to
+        proposal.md ("Skipped — <mode> mode") and return immediately.
+        Do NOT create full content. The opsx-propose loop will
+        continue to the next ready artifact.
+      - If "Full" or no mode line: proceed with the full instruction below.
+
+      Create the proposal document based on the brainstorming output.
+
+      Read brainstorm.md for the validated design. Extract:
+      - **Why**: The motivation (from brainstorming discussion)
+      - **What Changes**: Specific changes agreed upon
+      - **Capabilities**: Identify which specs will be created or modified:
+        - **New Capabilities**: List capabilities being introduced. Each becomes a new `specs/<name>/spec.md`. Use kebab-case names.
+        - **Modified Capabilities**: List existing capabilities whose REQUIREMENTS are changing. Check `openspec/specs/` for existing spec names.
+      - **Impact**: Affected code, APIs, dependencies, or systems.
+
+      Since brainstorming already explored the problem space,
+      this should be a concise extraction, not a new exploration.
+
+      IMPORTANT: The Capabilities section is critical. It creates the contract between
+      proposal and specs phases. Each capability listed here will need a spec file.
+
+      Keep it concise (1-2 pages). Focus on the "why" not the "how".
+    requires:
+      - brainstorm
+
+  - id: design
+    generates: design.md
+    description: Technical design document with implementation details
+    template: design.md
+    instruction: |
+      PRECHECK — workflow mode:
+      Read brainstorm.md. Look for "> Workflow mode:" line.
+      - If "Hotfix" or "Tweak": write a one-line placeholder to
+        design.md ("Skipped — <mode> mode") and return immediately.
+        Do NOT create full content.
+      - If "Full" or no mode line: proceed with the full instruction below.
+
+      Create the design document explaining HOW to implement the change.
+
+      Read brainstorm.md as input. brainstorm.md is a raw capture of
+      the brainstorming skill's output (typically a decision log with
+      Q1-Qn decisions, trade-offs, and context). Your job is to
+      REORGANIZE that content into the structured sections below.
+
+      This is a transformation, not a copy. Extract and restructure:
+      - Decisions (Q1-Qn from brainstorm) → design.md §Decisions
+      - Background/context → design.md §Context
+      - Trade-offs → design.md §Risks / Trade-offs
+      - Add Goals/Non-Goals and Migration Plan (may require
+        inference from brainstorm.md content)
+
+      Sections:
+      - **Context**: Background, current state, constraints, stakeholders
+      - **Goals / Non-Goals**: What this design achieves and explicitly excludes
+      - **Decisions**: Key technical choices with rationale (why X over Y?). Include alternatives considered per decision.
+      - **Risks / Trade-offs**: Known limitations, things that could go wrong. Format: [Risk] → Mitigation
+      - **Migration Plan**: Steps to deploy, rollback strategy (if applicable)
+      - **Open Questions**: Outstanding decisions or unknowns to resolve
+
+      Focus on architecture and approach, not line-by-line implementation.
+      Good design docs explain the "why" behind technical decisions.
+    requires:
+      - brainstorm
+
+  - id: specs
+    generates: "specs/**/*.md"
+    description: Detailed specifications for the change
+    template: spec.md
+    instruction: |
+      PRECHECK — workflow mode:
+      Read brainstorm.md. Look for "> Workflow mode:" line.
+      - If "Hotfix" or "Tweak": write a one-line placeholder to
+        specs/skipped.md ("Skipped — <mode> mode") and return immediately.
+        Do NOT create spec files.
+      - If "Full" or no mode line: proceed with the full instruction below.
+
+      Create specification files that define WHAT the system should do.
+
+      Create one spec file per capability listed in the proposal's Capabilities section.
+      - New capabilities: use the exact kebab-case name from the proposal (specs/<capability>/spec.md).
+      - Modified capabilities: use the existing spec folder name from openspec/specs/<capability>/ when creating the delta spec at specs/<capability>/spec.md.
+
+      Delta operations (use ## headers):
+      - **ADDED Requirements**: New capabilities
+      - **MODIFIED Requirements**: Changed behavior - MUST include full updated content
+      - **REMOVED Requirements**: Deprecated features - MUST include **Reason** and **Migration**
+      - **RENAMED Requirements**: Name changes only - use FROM:/TO: format
+
+      Format requirements:
+      - Each requirement: `### Requirement: <name>` followed by description
+      - Use SHALL/MUST for normative requirements (avoid should/may)
+      - Each scenario: `#### Scenario: <name>` with WHEN/THEN format. GIVEN is optional — add it only for non-default preconditions (e.g., already-logged-in user, non-TTY stdin); it maps to the TDD Arrange phase. Default-state scenarios start with WHEN.
+      - **CRITICAL**: Scenarios MUST use exactly 4 hashtags (`####`). Using 3 hashtags or bullets will fail silently.
+      - Every requirement MUST have at least one scenario.
+
+      Specs should be testable - each scenario is a potential test case.
+    requires:
+      - proposal
+
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist with trackable tasks
+    template: tasks.md
+    instruction: |
+      PRECHECK — workflow mode:
+      Read brainstorm.md. Look for "> Workflow mode:" line.
+      - If "Hotfix" or "Tweak": write a one-line placeholder to
+        tasks.md ("- [ ] Skipped — <mode> mode") and return immediately.
+        Do NOT create full task list.
+      - If "Full" or no mode line: proceed with the full instruction below.
+
+      Create the task list that breaks down the implementation work.
+
+      **IMPORTANT: Follow the template below exactly.** The apply phase parses
+      checkbox format to track progress. Tasks not using `- [ ]` won't be tracked.
+
+      Guidelines:
+      - Group related tasks under ## numbered headings
+      - Each task MUST be a checkbox: `- [ ] X.Y Task description`
+      - Tasks should be small enough to complete in one session
+      - Order tasks by dependency (what must be done first?)
+
+      Reference specs for what needs to be built and design.md for
+      how to build it (architecture decisions, trade-offs, migration).
+    requires:
+      - specs
+      - design
+
+  - id: plan
+    generates: plan.md
+    description: Micro-task implementation plan using Superpowers writing-plans
+    template: plan.md
+    instruction: |
+      PRECHECK — workflow mode:
+      Read brainstorm.md. Look for "> Workflow mode:" line.
+      - If "Hotfix" or "Tweak": write a one-line placeholder to
+        plan.md ("Skipped — <mode> mode") and return immediately.
+        Do NOT invoke the writing-plans skill.
+      - If "Full" or no mode line: proceed.
+
+      PRECHECK — required skill availability:
+      Before invoking, confirm `writing-plans` appears in
+      your available skills list. If missing, STOP and inform the user
+      that the Superpowers plugin must be installed (or that they can
+      explicitly opt to write plan.md manually using the template
+      below). Do NOT silently fall back.
+
+      MANDATORY SKILL INVOCATION:
+      You MUST invoke the `skill` tool with name `writing-plans`
+      before writing plan.md. Do NOT paraphrase the skill's
+      behavior from memory — the skill tool call loads the skill's
+      SKILL.md into your context, which is required for correct
+      micro-task decomposition AND produces a `skill-call` audit
+      marker that the ai-eval evaluation pipeline relies on to
+      detect that this skill was used. Skipping the skill tool
+      call = process violation (the marker won't appear in the
+      prompts archive and the cycle will be scored as if
+      writing-plans was never used).
+
+      Invoke the skill tool now: `skill` with name `writing-plans`.
+
+      IMPORTANT output redirection:
+      - Do NOT write to `docs/superpowers/plans/`. Instead, write
+        the plan directly to this change's `plan.md`.
+
+      The writing-plans skill will:
+      1. Read the tasks.md and design.md for context
+      2. Break each task into 2-5 minute micro-steps (TDD style)
+      3. Include exact file paths, code snippets, test commands
+      4. Add commit points after each task
+
+      Pass the tasks.md content to the skill as the input for
+      decomposition. The plan should reference the specs and
+      design artifacts in this change directory.
+    requires:
+      - tasks
+
+  - id: execution-contract
+    generates: execution-contract.md
+    description: Compressed handoff from planning artifacts to implementation
+    template: execution-contract.md
+    instruction: |
+      PRECHECK — planning artifact availability:
+      This artifact compresses planning artifacts into a single execution
+      handshake. Check which artifacts exist in this change directory:
+
+      - If proposal.md, specs/, design.md, tasks.md, plan.md ALL exist
+        → Full mode: read all of them and extract/compress.
+      - If NONE exist and user described a small fix (≤4 files, no new
+        modules, no API/schema changes) → Hotfix mode: ask the user for
+        a one-sentence Intent Lock + a numbered task list, skip reading
+        upstream artifacts.
+      - Otherwise → STOP and tell the user planning artifacts are
+        incomplete. Route them to complete the planning phase first.
+
+      FULL MODE — extraction and compression:
+      Read proposal.md, specs/, design.md, tasks.md, plan.md.
+      Extract and compress into execution-contract.md using the template:
+
+      1. **Intent Lock** — from proposal.md:
+         - Change name: from proposal title
+         - Problem to solve: one sentence from ## Why
+         - In scope: from ## What Changes
+         - Out of scope: from proposal's non-goals (or "not declared" if absent)
+         - Requirement count: count ### Requirement: blocks across all specs/
+         - Scenario count: count #### Scenario: blocks across all specs/
+         - Design decision count: count decisions in design.md ## Decisions
+         - Task batch count: count ## numbered headings in tasks.md
+
+      2. **Approved Behavior** — from specs/:
+         - Approved requirement summary: one line per ### Requirement: (name + key verb)
+         - Key scenarios: list each #### Scenario: name
+         - Acceptance checks: extract WHEN/THEN conditions as checkable items
+
+      **Acceptance Anchors** — from openspec/config.yaml + proposal.md milestone:
+         Read openspec/config.yaml. If it has no `acceptance_doc:` key, write
+         "N/A — no external acceptance doc declared" in the Acceptance Anchors
+         section and skip this step.
+         If present, read this change's proposal.md and extract the milestone
+          declaration (e.g. "Milestone: R5"). Filter
+         config.yaml's acceptance_doc.anchors to those whose `milestone` field
+         matches the proposal's declared milestone (support multiple — union).
+         For each mandated anchor, fill a row in the Acceptance Anchors table:
+         - Anchor ID: the ID from config (e.g. V5) — reference only, do NOT
+           copy the statement text (it lives in config to prevent softening)
+         - Maps to specs: which spec capabilities in this change cover it
+         - Maps to tasks: which tasks.md §X.Y groups deliver it
+         - Out of scope?: "no" by default; if this change legitimately does
+           not deliver a mandated anchor in this cycle, mark "yes" + rationale
+           + follow-up milestone (this is the ONLY way to drop a mandated
+           anchor — verify Check 9 Step 3 treats mandated-but-absent as
+           ❌ NOT DECLARED → FAIL; marking Out-of-scope with rationale is the
+           sanctioned opt-out)
+
+      3. **Design Constraints** — from design.md ## Decisions:
+         - Architecture constraints: decisions about structure/patterns
+         - Interface constraints: decisions about APIs/protocols
+         - Dependency constraints: decisions about libraries/frameworks
+         - Data constraints: decisions about schemas/formats
+
+      4. **Task Batches** — from tasks.md ## groups + plan.md micro-steps:
+         - One Batch block per tasks.md ## group
+         - Goal: the group title
+         - Completion criteria: derived from plan.md commit points for that group
+
+      5. **Test Obligations** — from specs/ scenarios:
+         - Behaviors that must fail first: each scenario's THEN clause
+         - Required edge cases: edge cases mentioned in scenarios
+         - Regression-sensitive areas: capabilities that have MODIFIED requirements
+
+      6. **Escalation Rules** — synthesize:
+         - When to rewind to planning: new behavior appears, interfaces change,
+           design assumptions fail
+         - When to rewind to bridging: tasks materially changed, plan restructured
+         - When implementation must not continue: ambiguity unresolved, scope expanded
+           beyond Intent Lock, contract is stale
+
+      HOTFIX MODE — minimal contract:
+      Ask the user:
+      1. One sentence: what problem does this fix solve?
+      2. Numbered list: what files will change and how?
+      Fill Intent Lock (Change name, Problem to solve, In scope/Out of scope) and
+      Task Batches from user answers. Leave Approved Behavior,
+      Design Constraints, Test Obligations as "N/A — hotfix".
+      Escalation Rules: "If fix expands beyond declared files,
+      regenerate as Full contract."
+
+      CROSS-CHECK — requirement coverage:
+      Before finalizing:
+      1. List every SHALL/MUST from specs/
+      2. Verify each appears in Approved Behavior or a Task Batch
+      3. Flag any unmapped requirement in Escalation Rules
+
+      APPROVAL GATE (mandatory — no implementation without this):
+      After generating execution-contract.md:
+      1. Show the user a summary: Intent Lock (one line), batch count,
+         any flagged unmapped requirements
+      2. Ask: "Approve this execution contract for implementation?"
+      3. Only after explicit user approval, append to execution-contract.md:
+
+         ## Approval
+         - Approval time: <current date/time>
+         - User confirmation summary: <one line summarizing what user approved>
+
+      4. Without the Approval section, apply phase PRECHECK will block.
+
+      STALE CONTRACT DETECTION:
+      The Intent Lock's structured counts (Requirement count, Scenario count, Design decision count,
+      Task batch count) serve as a content fingerprint. If upstream artifacts
+      change after contract generation, these counts will mismatch.
+      The apply instruction's PRECHECK re-reads upstream artifacts and
+      compares counts — see apply.instruction for details.
+    requires: []
+
+  - id: bug-investigation
+    generates: bug-investigation.md
+    description: Root cause investigation report for bugs during apply
+    template: bug-investigation.md
+    instruction: |
+      This artifact is produced when a bug is encountered — during
+      apply step 2 (subagent reports BLOCKED), or independently
+      during manual testing, code review, production investigation,
+      or any other discovery context. It is NOT part of the normal
+      planning flow — it is a conditional side-branch that can fire
+      at any point after a change directory exists.
+
+      WHEN TO PRODUCE:
+      - A subagent reports BLOCKED (test failure, exception, build error)
+      - You have tried a fix and it didn't work
+      - The behavior is unexpected and you don't understand why
+      - A bug is found during manual testing or production investigation
+      DO NOT produce this for: known limitations, out-of-scope items,
+      or user-requested scope changes (those go to Escalation Rules).
+
+      PRECHECK — required skill availability:
+      Before invoking, confirm `systematic-debugging` appears in
+      your available skills list. If missing, STOP and inform the
+      user that the Superpowers plugin must be installed. Do NOT
+      silently fall back to manual debugging.
+
+      MANDATORY SKILL INVOCATION:
+      You MUST invoke the `skill` tool with name
+      `systematic-debugging` before starting Phase 1 below. Do NOT
+      paraphrase the skill's debugging methodology from memory —
+      the skill tool call loads the skill's SKILL.md into your
+      context, which provides the authoritative root cause
+      investigation process AND produces a `skill-call` audit
+      marker that the ai-eval evaluation pipeline relies on to
+      detect that this skill was used (ai-eval 项4 调试+审查
+      requires systematic-debugging skill-call ≥1 for ★★★).
+      Skipping the skill tool call = process violation (the marker
+      won't appear in the prompts archive and the cycle will be
+      scored as if systematic debugging was never used).
+
+      Invoke the skill tool now: `skill` with name
+      `systematic-debugging`.
+
+      The phases below are bridge-specific supplements to the
+      skill — they add escalation rules and resolution tracking
+      that the generic skill does not cover. Follow the skill's
+      methodology first, then use these phases for structure.
+
+      THE IRON LAW: No fixes without root cause investigation first.
+      If you haven't completed Phase 1, you cannot propose fixes.
+      "Quick fix, investigate later" = STOP. Return to Phase 1.
+
+      PHASE 1: Root Cause Investigation
+      1. Read error messages carefully — stack traces, line numbers,
+         file paths, error codes often contain the exact solution
+      2. Reproduce consistently — exact steps, every time? If not
+         reproducible, gather more data, don't guess
+      3. Check recent changes — git diff, recent commits, new
+         dependencies, config changes, environment differences
+      4. Multi-component systems: add diagnostic instrumentation at
+         each component boundary. Log what enters and exits each layer.
+         Run once to gather evidence, analyze which component fails
+      5. Trace data flow backward — where does the bad value originate?
+         Keep tracing up until you find the source. Fix at source.
+
+      PHASE 2: Pattern Analysis
+      1. Find working examples of similar code in the same codebase
+      2. Compare against references — read reference implementation
+         completely
+      3. Identify every difference between working and broken, however
+         small
+      4. Understand dependencies: other components, settings, config,
+         environment, assumptions
+
+      PHASE 3: Hypothesis and Testing
+      Scientific method: form a SINGLE hypothesis ("I think X is the
+      root cause because Y"), test with the smallest possible change
+      (one variable at a time), verify before continuing.
+      If it didn't work, form a NEW hypothesis — don't add more fixes.
+      When you don't know, say so and ask for help.
+
+      PHASE 4: Implementation
+      1. Create failing test case — simplest reproduction, automated
+         if possible. Follow TDD rules.
+      2. Implement single fix — address root cause, one change at a
+         time, no "while I'm here" improvements
+      3. Verify fix — test passes? no regressions? issue resolved?
+      4. If fix doesn't work: count attempts.
+         - < 3 failed fixes → return to Phase 1
+         - ≥ 3 failed fixes → STOP. Fill the Escalation section.
+
+      ESCALATION (≥3 failed fixes):
+      3+ failed fixes = architectural problem, not a bug. Each fix
+      revealing new problems elsewhere = wrong architecture.
+      - Record what was attempted and why each failed
+      - Analyze whether the architecture itself is wrong
+      - Present to user: "3+ fixes have failed. This may be an
+        architectural issue. Options: (a) rethink the approach,
+        (b) simplify scope, (c) seek external help."
+      - Wait for user decision before attempting more fixes.
+
+      RESOLUTION:
+      After investigation, fill the Resolution section:
+      - "resolved": root cause found, fix applied, tests pass
+      - "unresolved": still investigating (apply phase stays paused)
+      - "escalated": ≥3 failures, awaiting user decision on architecture
+
+      After resolution = "resolved", delete this file or rename to
+      bug-investigation.resolved.md so openspec status no longer
+      reports it as blocking. Apply phase resumes from the paused task.
+    requires: []
+
+  - id: verify
+    generates: verify.md
+    description: Post-implementation verification against specs, design, and tasks
+    template: verify.md
+    instruction: |
+      PRECHECK — implementation evidence:
+      Before producing verify.md, run BOTH commands. If either
+      returns 0, STOP and tell the user that apply phase has not
+      yet produced reviewable changes.
+
+      1. Commit evidence (must return > 0):
+         git log --oneline $(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null)..HEAD | wc -l
+
+      2. Task progress (must return > 0):
+         grep -c '^- \[x\]' openspec/changes/<change-name>/tasks.md
+
+      Only after BOTH return positive numbers, proceed to invoke
+      the verification skill below.
+
+      RECOMMENDED SKILL INVOCATION:
+      Invoke the `skill` tool with name `openspec-verify-change` if
+      it is available in your skills list (the `/opsx-verify` slash
+      command is its user-facing equivalent). This skill encapsulates
+      the 9 checks below into a reusable procedure and produces a
+      `skill-call` audit marker.
+
+      If `openspec-verify-change` is unavailable (e.g. OpenSpec CLI
+      not fully installed), do NOT STOP — run the numbered checks
+      below manually and record results in verify.md. The checks are
+      self-contained in this instruction; the skill is a convenience
+      wrapper, not a hard dependency.
+
+      Invoke the skill tool now: `skill` with name
+      `openspec-verify-change`.
+
+      IMPORTANT timing note:
+      - Unlike other artifacts, verify.md is produced AFTER the apply
+        phase completes, NOT during planning. The `requires: [plan]`
+        edge (from the original schema) is superseded by
+        apply.requires: [execution-contract] — verify still depends
+        on plan transitively. The actual verification step MUST run
+        on a completed implementation.
+
+      The verify step MUST perform the following checks and record
+      results in verify.md using the template:
+
+      1. **Structural validation**: Run `openspec validate --all --json`
+         in the repository root and confirm every item returns
+         `"valid": true`. If any item fails, record the issues and
+         return to fix the underlying artifact before proceeding.
+
+      2. **Task completion**: Confirm every checkbox in tasks.md is
+         `- [x]`. For any `- [ ]` remaining, document the reason
+         (e.g. manual / out-of-scope / blocked) and whether it blocks
+         archive.
+
+      3. **Task completion spot audit (anti self-attestation, recommended)**:
+
+         Sample N = min(3, ceil(done_count × 0.1)) tasks marked `[x]`
+         in tasks.md. For each, open the spec `#### Scenario:` block
+         whose THEN clause the task claims to satisfy, and confirm
+         the implementation actually delivers that behavior. Prefer
+         tasks crossing layer boundaries / state machines / external
+         dependencies (higher false-`[x]` probability).
+
+         Any ❌ NOT DELIVERED → record in retrospective §2 Misses.
+         Non-blocking for Overall Decision UNLESS paired with a
+         Check 9 ❌ on the same anchor (in which case Check 9's
+         blocking verdict governs).
+
+         HONESTY NOTE: in a single-LLM flow, the verifier IS the
+         implementer, so self-audit has limited power to catch its
+         own false `[x]`. This check reaches full strength only when
+         verify is run by an independent subagent or a human. Marking
+         it "recommended, non-blocking" reflects this honestly.
+
+      4. **Delta spec sync state**: For each directory under
+         `openspec/changes/<name>/specs/`, compare against the
+         corresponding `openspec/specs/<capability>/spec.md` and
+         record one of:
+         - ✓ Already synced
+         - ✗ Needs sync (list the capabilities)
+         - N/A (no delta specs produced)
+
+      5. **Design/specs coherence**: Spot-check that design.md
+         decisions reference or align with the requirements listed
+         in specs/. Record any drift as a warning (non-blocking).
+
+      6. **Implementation signal**: Confirm all code changes are
+         committed (no unstaged files in the worktree). Cite the
+         commit range if known.
+
+      7. **Front-door routing leak detector** (warning, non-blocking):
+
+         For projects using superpowers-schema, design output
+         should never land in `docs/superpowers/specs/` — the
+         brainstorm artifact's output redirection (see this
+         schema's brainstorm.instruction) routes it to
+         `openspec/changes/<name>/brainstorm.md`. Run:
+
+           ls docs/superpowers/specs/*.md 2>/dev/null
+
+         If any files exist, record a WARNING: "Front-door routing
+         leak — design output found at docs/superpowers/specs/...;
+         these belong in openspec/changes/<name>/brainstorm.md or
+         design.md. Move/delete after confirming content is captured
+         in the change directory."
+
+         Non-blocking — adopters may have legitimate non-schema use
+         of that directory predating schema install. Surfaces the
+         leak so the user can decide whether to clean up.
+
+      8. **Deferred dogfood vs automated-test equivalence**:
+
+         If plan.md has any tasks marked `[~]` deferred (manual smoke /
+         dogfood / live-environment checks that weren't run in this
+         cycle), enumerate each in verify.md §8 and identify the
+         equivalent automated test that covers the same assertions.
+
+         If no equivalent automated test exists for a deferred manual
+         check, that row is a real coverage gap — record in
+         retrospective Misses with a follow-up plan, not silently
+         deferred.
+
+         The decision table makes "deferred-but-covered" vs "deferred-
+         and-gapped" visible at archive time, so reviewers can audit
+         completeness without re-deriving the rationale from plan +
+         test files.
+
+         Non-blocking on its own — Overall Decision remains PASS even
+         with identified gaps, provided they're recorded as follow-up.
+          Blocks only if §8 is empty AND plan.md has `[~]` rows (means
+          the gap analysis was skipped, not that gaps don't exist).
+
+         JURISDICTION NOTE: Check 8 governs deferrals that are NOT tied
+         to an acceptance anchor. If a deferred dogfood corresponds to
+         an anchor declared in openspec/config.yaml's acceptance_doc,
+         Check 9 takes precedence — recording the gap in retrospective
+         §2 does NOT override a Check 9 ❌ NOT COVERED verdict.
+
+       9. **Acceptance anchor coverage (external requirement traceability)**:
+
+          This check traces implementation back to externally-declared
+          acceptance criteria (e.g. a PRD/RPD in docs/), breaking the
+          self-attestation loop where tasks.md `[x]` only proves the
+          checkbox moved.
+
+           STEP 0 — MILESTONE-MANDATED ANCHORS (declarative, NOT opt-in):
+           Read this change's proposal.md. Extract the milestone
+            declaration (e.g. "Milestone: R5"). If config has
+           acceptance_doc but proposal declares no milestone → FAIL here
+           (apply's proposal-milestone PRECHECK should have caught it).
+           Read config.yaml's acceptance_doc.anchors. Filter to those
+           whose `milestone` field matches the proposal's declared
+           milestone (support multiple milestones — union the sets).
+           This filtered set is the MANDATED anchor set — every anchor
+           in it MUST be traced by Check 9, regardless of whether the
+           contract's Acceptance Anchors table lists it.
+
+           STEP 1 — AUTHORITY SOURCE: Read `openspec/config.yaml`. Look for the
+           `acceptance_doc:` key. If absent, this check is legitimately
+           N/A (e.g. a library project with no external PRD) — write
+           "N/A — no external acceptance doc declared" and skip.
+
+           If present, config.yaml's `acceptance_doc.anchors` is the
+           single source of truth for anchor IDs and verbatim statements.
+           The contract references IDs only — statements live in config
+           to prevent silent softening.
+
+           STEP 2 — TRACED SET = (contract-declared ∪ milestone-mandated):
+          For each anchor in this union, fetch the verbatim statement
+          from config.yaml by ID, then verify the implementation
+          actually satisfies it. If an anchor is milestone-mandated
+          but NOT in the contract's Acceptance Anchors table → mark
+          ❌ NOT DECLARED (a stronger verdict than the old warning).
+          If this change has no execution-contract.md at all (legacy
+          change), the contract-declared set is empty and traced set
+          = milestone-mandated set only — every mandated anchor
+          resolves to ❌ NOT DECLARED → FAIL.
+
+          Verify the implementation actually satisfies each statement:
+
+          - Evidence MUST cite: test file path + line range AND the
+            exact assertion line(s) quoted verbatim. Open the cited file
+            and confirm the lines exist and contain the cited assertions.
+            Fabricated citations = immediate FAIL + retrospective §2 🔴.
+          - Anti-patterns that do NOT count as coverage (mark ❌ NOT
+            COVERED): tasks.md `[x]` alone; test.skip when SUT unavailable;
+            weak assertions (element-visible / count>0 / state-appeared-
+            once) when the statement requires end-to-end correctness;
+            a test exercising a SUBSET of the acceptance path (statement
+            names A→B→C→D but test wires A→D); recording the gap in
+            retrospective §2 (does NOT override Check 9 FAIL).
+          - Decision: any ❌ NOT COVERED → Overall Decision = ❌ FAIL
+            (blocking). Any ❌ NOT DECLARED (milestone-mandated but
+            absent from contract) → ❌ FAIL (blocking). ⚠️ PARTIAL →
+            PASS WITH WARNINGS + retro §2 follow-up.
+
+           STEP 3 — UNDECLARED-ANCHOR HANDLING (revised by mandate status):
+          - milestone-mandated but absent from contract → ❌ NOT DECLARED
+            → FAIL (was non-blocking warning in v1; upgraded because the
+            milestone mapping is an objective project-level declaration
+            the change inherits mandatorily — opting out by not listing
+            is the same class of evasion as softening the statement).
+          - NOT milestone-mandated and absent from contract → WARNING
+            (non-blocking, unchanged — a change may legitimately not
+            touch unrelated milestones).
+
+          RESIDUAL RISK (prompt-layer boundary, document honestly):
+          Step 0 only fires if the verifier actually reads proposal.md
+          AND config.yaml. A non-cooperative LLM that skips reading
+          cannot be forced by schema text alone — that requires
+          harness-level command-execution receipts, out of scope here.
+           Mitigation in scope: apply's proposal-milestone PRECHECK forces
+           proposal to declare a milestone before apply starts, so Step 0
+           has input to read at verify.
+
+       DECISION POINT — DP-6 (verify failure routing):
+       After running the 9 checks and marking Overall Decision, route
+       based on the decision:
+
+       - ✅ PASS or ⚠️ PASS WITH WARNINGS → proceed to retrospective.
+         Warnings are recorded for retro §2 Misses but do not block.
+        - ❌ FAIL → STOP. Do NOT proceed to retrospective or archive.
+          For each blocking check, identify the root artifact:
+          (Checks 3, 5, and 7 are non-blocking warnings — they do not
+          trigger FAIL, only record in verify.md.)
+          - Check 1 (structural) fails → fix the malformed artifact
+            (proposal/specs/design/tasks/plan/execution-contract), then
+            re-run verify.
+         - Check 2 (task completion) fails → return to apply phase
+           (/opsx-apply) to complete remaining tasks, then re-run verify.
+         - Check 4 (delta sync) fails → run /opsx-sync to sync delta
+           specs, then re-run verify. Do NOT use /opsx-archive here
+           (archive moves the change folder — only archive after
+           verify passes).
+         - Check 6 (implementation signal) fails → commit unstaged
+           changes in the worktree, then re-run verify.
+          - Check 8 blocks (gap analysis skipped) → fill §8 in verify.md
+            with the deferred-dogfood equivalence analysis, then re-run.
+          - Check 9 (acceptance anchor coverage) has any ❌ NOT COVERED
+            → FAIL. Route by root cause:
+            (a) Planned coverage wrong (mapped specs/tasks don't actually
+                cover the verbatim statement from config.yaml) → return
+                to specs/tasks phase, regenerate so they truly cover the
+                statement, re-apply affected tasks, re-verify.
+            (b) Planned coverage correct but implementation didn't
+                deliver → return to apply to implement the missing
+                behavior, re-verify.
+            (c) Statement genuinely out of scope for this change → the
+                anchor should not have been in this change's contract.
+                Regenerate execution-contract with the anchor moved to
+                Out of scope + rationale, get user re-approval, re-verify.
+                This is the ONLY legitimate way to drop an anchor —
+                never silently remove it.
+          - Check 9 has any ❌ NOT DECLARED (milestone-mandated but
+            absent from contract) → FAIL. Route by root cause:
+            (d) The change legitimately claims a milestone whose anchor
+                set it does not fully deliver in this cycle → the
+                milestone declaration in proposal is too broad. Either
+                narrow the milestone claim (if the change is actually
+                a sub-scope) OR add the mandated anchors to the
+                contract's Acceptance Anchors table as "Out of scope?
+                yes" with rationale + follow-up milestone, get user
+                re-approval, re-verify. Narrowing the milestone is the
+                honest path if the change doesn't actually complete
+                that milestone.
+            (e) The change forgot to list a mandated anchor it actually
+                covers → add it to the contract's Acceptance Anchors
+                table, fill the evidence, re-verify.
+            (f) No execution-contract.md exists at all (legacy change
+                predating mandatory contracts) → if this is a new
+                change, STOP and create the contract first. If this is
+                a historical archived change being re-verified, every
+                mandated anchor resolves to ❌ NOT DECLARED → FAIL —
+                this is the correct signal that the legacy change
+                never traced its acceptance anchors.
+          - tests_pass = false (suite not actually run — "unknown" is
+            no longer accepted) → FAIL. Run the test suite via
+            opsx-verify Step 4.0 (uses openspec/config.yaml's
+            verify_test_command), then re-run verify.
+          - test_skip_rate > 50% → FAIL. The suite mostly didn't exercise
+            the system. Fix the environment (e.g. start the SUT for e2e)
+            or mark genuinely out-of-scope tests with rationale in retro.
+      The user may override a FAIL only by explicitly stating "proceed
+      despite FAIL" — in that case, record the override in verify.md
+      and retro §2 Misses (🔴 blocking). Never auto-override.
+
+      Verify MAY be re-run multiple times as the implementation is
+      refined — each run overwrites verify.md with current state.
+
+      METRICS SECTION (mandatory for automated evaluation):
+      After filling the 9 checks and Overall Decision, fill the
+      ## Metrics section at the end of verify.md. Use key: value
+      format (one per line, plain text — NOT YAML/JSON/code blocks).
+      The heading must be exactly "## Metrics" — no section prefix,
+      no numbering. Key fields and their sources:
+      - overall_decision: the checked Overall Decision value
+      - openspec_validate_pass: from Check 1
+      - tasks_total / tasks_done: from Check 2
+      - delta_specs_synced: from Check 4
+      - implementation_committed: from Check 6
+      - coverage_pct: if CI coverage data is available, fill the
+        number; otherwise write "unknown"
+      - tests_pass: true/false — the suite MUST be actually run (see
+        opsx-verify Step 4.0). "unknown" is NO LONGER ACCEPTED; suite
+        not run = false (triggers FAIL via DP-6).
+      - tests_run_evidence: the exact command + exit code + one key
+        output line proving the suite ran (anti-fabrication).
+      - test_skip_rate: parsed from the test report. >50% → FAIL,
+        >20% → at least PASS WITH WARNINGS.
+      - acceptance_anchors_total: count of anchors in
+        openspec/config.yaml's acceptance_doc (0 if no acceptance_doc)
+      - acceptance_anchors_covered: count of ✓ verdicts in Check 9
+      - acceptance_anchors_not_covered: count of ❌ verdicts in Check 9
+      - deferred_dogfood_gaps: count of "true gap = ✅" rows in Check 8
+      This section is machine-parsed by the ai-eval evaluation skill
+      to automate dimension 7 (coverage+gates). Do NOT skip it even
+      if values are "unknown" — "unknown" lets the evaluator mark the
+      item as "partial automated" rather than "需人工补充".
+
+    requires:
+      - plan
+
+  - id: retrospective
+    generates: retrospective.md
+    description: Evidence-first retrospective of completed change
+    template: retrospective.md
+    instruction: |
+      PRECHECK — verify completion evidence:
+      Before producing retrospective.md, run these commands. If
+      either fails, STOP and tell the user verify must pass first.
+
+      1. verify.md exists:
+         test -f openspec/changes/<change-name>/verify.md
+
+      2. verify.md's Overall Decision is NOT marked as FAIL.
+         The verify.md template has 3 mutually-exclusive checkboxes
+         in its "Overall Decision" section: "✅ PASS", "⚠️ PASS WITH
+         WARNINGS", "❌ FAIL". Only "❌ FAIL" being checked is blocking:
+         ! grep -q '^- \[x\] ❌ FAIL' openspec/changes/<change-name>/verify.md
+
+      Only after both succeed, proceed.
+
+      Write a retrospective of this change with evidence-first analysis.
+
+      IMPORTANT timing note:
+      - retrospective.md is produced AFTER apply phase completes and
+        verify.md shows no blocking issues. The `requires: [verify]`
+        edge exists only for schema graph purposes; the actual
+        retrospective MUST run on a completed, verified implementation.
+
+      Process (follow these 3 steps):
+
+      1. **Gather evidence**
+         - Run `git log --oneline <base>..HEAD` in the change worktree
+           (or main checkout if the worktree was already merged) to
+           get the commit range
+         - Read brainstorm.md, plan.md, tasks.md in this change
+           directory for plan-vs-actual comparison
+         - If verify.md contains failing items, address them BEFORE
+           writing the retro
+
+      2. **Write the retrospective sections** — each claim cites
+         a commit hash, file path, test name, or measurable fact.
+
+         The retrospective has §0 Evidence (quantitative front-
+         matter) plus 6 analysis sections (§1–§6). Downstream
+         analysis bullets reference §0 instead of inlining
+         `[evidence: commit X]` per line.
+
+         §0) **Evidence** — quantitative front-matter populated
+             from `git log <base>..HEAD`, `tasks.md`, and
+             verify.md: commit count, diff size (lines/files),
+             tasks-done ratio, active hours, subagent dispatch
+             count, new external dependencies, post-merge bugs,
+             OpenSpec validate state at archive, test coverage
+             signal, and a one-line commit chain.
+
+         §1) **Wins** — what worked well, with evidence
+
+         §2) **Misses** — what didn't, marked by severity:
+             - 🔴 blocking
+             - 🟡 painful
+             - 📌 nit
+
+         §3) **Plan deviations** — tasks whose scope changed, and why
+
+         §4) **Skill / workflow compliance** — list each skill in
+             this schema's apply phase; mark whether it was
+             actually used. For any ✗, fill the
+             `### Deliberately Skipped Skills` subsection per the
+             rules below.
+
+         §5) **Surprises** — assumptions that turned out wrong
+
+         §6) **Promote candidates → long-term learning** — use
+             a `- [ ]` checklist (not a flat table). Each
+             candidate:
+
+             - Title with severity emoji (🔴/🟡/📌) + one-
+               sentence learning
+             - `→ **Promote to** <destination>` (memory /
+               CLAUDE.md / schema / skill / one-off)
+             - Two body lines aligned with the feedback memory
+               schema: `> **Why**: <reason>` and
+               `> **How to apply**: <trigger condition>`
+
+             Unchecked `- [ ]` items represent in-flight
+             candidates that carry into the next cycle's retro
+             for re-evaluation. The checklist + Why/How body
+             shape lets candidates transfer mechanically to
+             `~/.config/opencode/memory/` without re-writing.
+
+         **Skipped-skill rules for §4**:
+
+         The schema was designed with the explicit intent that
+         no apply-phase skill should be skipped — each skill is
+         in the flow for a reason. Default expectation: §4 has
+         every row marked ✓.
+
+         For any skill marked ✗, DO NOT just write a one-line
+         reason. Instead, the `### Deliberately Skipped Skills`
+         subsection must answer three questions per skipped
+         skill:
+
+         - **What was skipped**: the specific skill or sub-step
+         - **Why this cycle**: the concrete cycle condition that
+           triggered the skip. Vague reasons ("not needed", "too
+           small", "no time", "blocked by external dep", "output
+           looked off") are insufficient — name the actual trigger
+           (a specific commit hash, log line, or observed behavior).
+         - **How to prevent recurrence**: which of these the
+           next cycle in the same situation should rely on
+           instead — schema graph fix / skill description
+           tightening / CLAUDE.md trigger / scope-judgment
+           rule / explicit "one-off — schema boundary case" (the
+           last must state why it's a boundary, not just label
+           the exception).
+
+         If multiple cycles skip the same skill with similar
+         "How to prevent" answers, that pattern is a §6 Promote
+         candidate (schema / skill PR motivator). The §4
+         subsection is a feedback loop into schema maintenance —
+         it should make the next retro's subsection shorter, not
+         longer.
+
+      3. **Retrospective skipping policy** (different from §4
+         skill skipping — this is whether to write the retro at
+         all):
+
+         - Trivial single-commit fixes: OK to skip the
+           retrospective entirely. Write a one-liner reason in
+           retrospective.md (e.g. "Skipped: single-commit linter
+           fix, no insights").
+         - Anything else: produce §0 Evidence plus all 6 analysis
+           sections (a placeholder "(none observed)" is fine if
+           a section truly has nothing).
+
+      4. **Forward-pointer policy (when facts change after writing)**
+
+         Retrospective.md reflects state at write-time. If
+         subsequent cycles discover that a claim, evidence, or
+         conclusion in this retro was wrong/incomplete:
+
+         - Do NOT rewrite the retrospective (loses audit trail of
+           what was known at the time)
+         - Add a forward-pointer in the retrospective itself:
+           `> **Update YYYY-MM-DD**: section X superseded by
+           <link to follow-up retro / commit / issue>`
+         - The follow-up artifact carries the corrected analysis
+
+         Why: retrospective is evidence-based — its value is
+         capturing what was known and reasoned at a specific point.
+          Rewriting it removes that audit trail.
+
+          When updating post-merge bug count via forward-pointer, also
+          update the ## Metrics section's `post_merge_bugs` field:
+          `> **Update YYYY-MM-DD**: post_merge_bugs: N`
+
+      METRICS SECTION (mandatory for automated evaluation):
+      After writing section 0-6, fill the ## Metrics section at the
+      end of retrospective.md. Use key: value format (one per line,
+      plain text — NOT YAML/JSON/code blocks). The heading must be
+      exactly "## Metrics" — no section prefix, no numbering.
+      Key fields and their sources:
+      - commits / diff_insertions / diff_deletions: from §0 Evidence
+      - tasks_total / tasks_done: from §0 Evidence
+      - tdd_used / code_review_used / systematic_debugging_used:
+        from §4 Skill compliance table (✓ → true, ✗ → false)
+      - deliberately_skipped_skills_count: count of ✗ in §4 table
+      - promote_candidates_proposed: count of unchecked `- [ ]` in §6
+      - promote_candidates_promoted: count of checked `- [x]` in §6
+      - carry_forward_items: count of items carried from previous
+        cycle's §6 (found via grep in §6's carry-forward note)
+      - post_merge_bugs: from §0 "Bugs encountered post-merge"
+        (0 at write time; update via forward-pointer after merge)
+      This section is machine-parsed by the ai-eval evaluation skill
+      to automate 项8 (线上质量, via post_merge_bugs) and
+      项10 (实践传承, via promote_candidates + carry_forward).
+      Do NOT skip it even if values are 0.
+
+      Write output to retrospective.md using the template structure.
+    requires:
+      - verify
+
+apply:
+  requires: [execution-contract]
+  tracks: tasks.md
+  instruction: |
+    This instruction is a convenience shortcut. It runs steps 0-6
+    in sequence. For finer control, use the granular commands:
+    /opsx-worktree (step 1), /opsx-implement (step 2), /opsx-verify
+    (step 3), /opsx-continue (step 4, retrospective), /opsx-archive
+    (step 5), /opsx-finish (step 6). If a step's output already
+    exists, skip it and resume from the next incomplete step.
+
+    Before implementing, set up an isolated workspace and executor:
+
+    0. **Pre-flight — verify required Superpowers skills**:
+
+       This schema's apply phase requires the following skills.
+       Confirm each appears in your available skills list before
+       proceeding:
+
+       - using-git-worktrees
+       - subagent-driven-development
+         (transitively: test-driven-development,
+                        requesting-code-review)
+       - finishing-a-development-branch
+
+       If any required skill is missing, STOP and inform the user —
+       do NOT proceed and do NOT silently fall back to manual
+       implementation. The user can install the Superpowers plugin,
+       or explicitly opt into the manual fallback path described at
+       the end of this instruction.
+
+        Additionally, confirm the project's expected CLI tools are
+        on PATH. The exact list depends on the project — read
+        plan.md and surface any tool mentioned (e.g., `mvn`/`mvnw`,
+        `docker`, `python3`, `jq`, `glab`/`gh`, `node`/`npm`). If
+        a tool is missing, surface as WARNING (not STOP) — the user
+         may have a fallback. Print the missing list once at apply
+         start so the user isn't surprised mid-cycle.
+
+        PRECHECK — proposal milestone declaration:
+        Read openspec/config.yaml. If it declares `acceptance_doc:`,
+        then this change's proposal.md MUST declare a milestone
+         (e.g. "Milestone: R5"). Read proposal.md and search
+        for a milestone declaration.
+
+        - If proposal declares no milestone AND config has acceptance_doc
+          → STOP. "This project declares acceptance anchors in
+          openspec/config.yaml, mapped to milestones. proposal.md must
+          declare which milestone this change targets, so verify Check 9
+           Step 0 can resolve the mandated anchor set. Add a 'Milestone:'
+           line to proposal.md, then re-run apply."
+        - If proposal declares a milestone → verify it matches one of
+          config.yaml's anchor.milestone values (case-insensitive). If
+          it matches none → WARNING (non-blocking): "proposal declares
+          milestone '<X>' but config.yaml's acceptance_doc.anchors has
+          no anchor mapped to that milestone. Check 9 Step 0 will find
+          an empty mandated set — legitimate if this is an extension
+          milestone beyond V1-V8, but verify the declaration is correct."
+        - If config.yaml has no acceptance_doc → this PRECHECK is N/A
+          (skip — no milestone-based anchoring for this project).
+
+        Rationale: verify Check 9 Step 0 reads the proposal's milestone
+        to determine the mandated anchor set. If the milestone is
+        missing at apply time, Step 0 has no input → the declarative
+        mechanism fails open (empty mandated set). This PRECHECK
+        guarantees Step 0 has input at verify time.
+
+        PRECHECK — execution-contract validity:
+       Before proceeding, verify the execution contract is valid:
+
+       1. execution-contract.md exists in the change directory.
+          If missing → STOP. Tell user to run the execution-contract
+          artifact first (`openspec instructions execution-contract
+          --change <name>`).
+
+       2. execution-contract.md has a ## Approval section with a
+          non-empty Approval time. If missing → STOP. Tell user the
+          contract must be approved before implementation.
+
+       3. Stale contract detection (content-level, not timestamp):
+          Re-read proposal.md, specs/, design.md, tasks.md, plan.md.
+          Count current values and compare to Intent Lock:
+          - Current ### Requirement: count vs Requirement count?
+          - Current #### Scenario: count vs Scenario count?
+          - Current design.md decision count vs Design decision count?
+          - Current tasks.md ## group count vs Task batch count?
+          If ANY count mismatches → contract is STALE.
+          STOP. Tell user: "Execution contract is stale — upstream
+          artifacts have changed. Re-run the execution-contract
+          artifact to regenerate."
+
+       4. Acceptance baseline immutability:
+          openspec/config.yaml is project-level infrastructure, NOT a
+          change artifact. If it declares `acceptance_doc:` (the
+          project's acceptance anchor baseline), a change MUST NOT
+          modify that section during apply — the anchors and their
+          verbatim statements are the authority source that verify
+          Check 9 traces to. Run:
+            git diff <merge-base>..HEAD -- openspec/config.yaml
+          If the diff touches the `acceptance_doc:`, `anchors:`,
+          `verify_test_command:`, or `verify_min_passed:` keys → STOP.
+          "This change attempted to modify the project's acceptance
+          baseline. Acceptance anchors are project-level; if a change
+          needs to alter them, open a separate acceptance-baseline
+          change with explicit user approval — do not silently edit
+          config.yaml inside a feature change."
+
+    1. **Workspace**: MANDATORY SKILL INVOCATION — you MUST
+       invoke the `skill` tool with name `using-git-worktrees`
+       to create an isolated git worktree for this change. Do NOT
+       create the worktree manually via `git worktree add` — the
+       skill tool call loads the skill's workspace setup logic
+       into your context AND produces a `skill-call` audit marker
+       that the ai-eval evaluation pipeline relies on. Skipping
+       the skill tool call = process violation.
+
+       Invoke the skill tool now: `skill` with name
+       `using-git-worktrees`.
+
+    2. **Executor — subagent-driven-development**:
+
+       MANDATORY SKILL INVOCATION — you MUST invoke the `skill`
+       tool with name `subagent-driven-development` to execute
+       the plan.md micro-tasks with fresh subagents per task. Do
+       NOT execute the tasks yourself without dispatching
+       subagents — the skill tool call loads the skill's
+       subagent orchestration logic into your context AND
+       produces a `skill-call` audit marker that the ai-eval
+       evaluation pipeline relies on to detect that this skill
+       was used. Skipping the skill tool call = process violation
+       (the marker won't appear in the prompts archive and TDD +
+       code-review transitive activation won't fire).
+
+       Invoke the skill tool now: `skill` with name
+       `subagent-driven-development`.
+
+       Tell the executor:
+       - Read plan.md in this change directory for micro-tasks
+       - Update tasks.md checkboxes as coarse tasks complete
+       - Work within the created worktree
+
+        IMPORTANT — transitive skill activation:
+        subagent-driven-development internally enforces the
+        following skills. Each dispatched subagent MUST invoke
+        these skills via the `skill` tool — the subagent's
+        skill tool call loads the SKILL.md into the subagent's
+        context AND produces a `skill-call` audit marker that
+        the ai-eval evaluation pipeline relies on to detect
+        that these skills were used:
+        - **test-driven-development** — every subagent MUST
+          invoke `skill` with name `test-driven-development`
+          before writing implementation code. Every task follows
+          RED-GREEN-REFACTOR. Implementation code written before
+          a failing test is deleted.
+        - **requesting-code-review** — after each task, a
+          code-reviewer subagent MUST invoke `skill` with name
+          `requesting-code-review`. The reviewer catches spec
+          compliance and code quality issues. A final review runs
+          for the entire implementation before apply concludes.
+
+         This schema does NOT support `executing-plans`
+        as a fallback. Per its SKILL.md, executing-plans does not
+        transitively activate TDD or code-review — defeating the
+        rigor that Superpowers brings. This schema is OpenCode-only;
+        if you need a different runtime, use the built-in `spec-driven`
+        schema instead.
+
+        CHECKPOINT PROTOCOL (session resilience):
+        Apply phases often span multiple sessions or suffer context
+        compression. To preserve resumability across sessions:
+
+        - After each coarse task group in tasks.md is completed (all
+          micro-steps for a `## N` heading done, checkbox marked
+          `- [x]`), record a checkpoint annotation:
+          ```
+          <!-- checkpoint: <commit-sha> at <YYYY-MM-DD HH:MM> — <task group title> done -->
+          ```
+          Append this as an HTML comment immediately after the last
+          `- [x]` line in that group. The commit-sha is the HEAD
+          commit after the group's final micro-step commit.
+
+        - When resuming an interrupted apply (via `/opsx-apply` on an
+          in-progress change), the executor MUST:
+          1. Read tasks.md and locate the last checkpoint annotation.
+          2. Confirm `git log` matches — the checkpoint's commit-sha
+             is present in the branch history.
+          3. Resume from the NEXT incomplete task group. Do NOT re-run
+             completed groups.
+          4. If checkpoint commit-sha is missing from git history
+             (branch was reset / force-pushed), warn the user and
+             re-verify from the start of the last "completed" group.
+
+        - Checkpoint annotations are lightweight (one HTML comment per
+          task group) and do not interfere with openspec's checkbox
+          parsing. They are informational — the canonical progress
+          source remains the `- [x]` / `- [ ]` checkboxes.
+
+        2a. **Bug investigation branch** (conditional — only when
+            a subagent reports BLOCKED):
+
+           When subagent-driven-development reports a BLOCKED status
+           (test failure, unexpected behavior, build error):
+
+           1. PAUSE the current task. Do NOT attempt a quick fix.
+           2. Produce the `bug-investigation` artifact by running
+              its instruction (4-phase root cause analysis).
+           3. The investigation produces bug-investigation.md with
+              a Resolution section.
+           4. If Resolution = "resolved" → resume apply from the
+              paused task.
+           5. If Resolution = "escalated" (≥3 failed fixes) →
+              STOP apply. Present the escalation to the user.
+              Do not attempt more fixes without user direction.
+           6. If Resolution = "unresolved" → apply stays paused.
+              Inform user that investigation is ongoing.
+
+           This branch is the debugging side-path. It does not
+           replace step 2 — it interrupts it when bugs occur, then
+           returns control to step 2 after resolution.
+
+    3. **Verification**: When all tasks are done, produce the
+       `verify` artifact by invoking **openspec-verify-change**
+       to check completeness, correctness, and coherence.
+       Re-run verify until all blocking issues are resolved.
+
+    4. **Retrospective (write while context is hot)**:
+
+       Once verify.md shows no blocking issues, produce the
+       `retrospective` artifact BEFORE opening any PR. Run the
+       retrospective artifact's instruction (which has its own
+       PRECHECK confirming verify.md exists and is not FAIL).
+
+       Why now, not after PR: retrospective is part of this cycle's
+       deliverables and should land in the same PR. Writing it after
+       PR merge produces a separate trailing commit and loses the
+       hot context (running tests, fresh fix memory).
+
+    5. **Archive (sync spec delta + move folder)**:
+
+       After retrospective.md is written, run `openspec archive -y`
+       (or invoke `/opsx-archive`). This:
+       - syncs delta specs from `openspec/changes/<name>/specs/`
+         into `openspec/specs/<capability>/spec.md`
+       - moves the change folder to
+         `openspec/changes/archive/YYYY-MM-DD-<name>/`
+
+         The PR diff after archive contains the COMPLETE cycle state:
+         all 9 planning+verify+retro artifacts done (bug-investigation
+         is optional and only present if apply hit a bug), spec synced
+         into main specs, change under archive/.
+
+    6. **Completion (PR is the LAST step)**:
+
+       MANDATORY SKILL INVOCATION — After retrospective + archive
+       are both done, you MUST invoke the `skill` tool with name
+       `finishing-a-development-branch`. Do NOT open the PR
+       manually via `gh pr create` — the skill tool call loads
+       the skill's branch-finishing logic into your context AND
+       produces a `skill-call` audit marker that the ai-eval
+       evaluation pipeline relies on to detect that this skill
+       was used. Skipping the skill tool call = process violation.
+
+       Invoke the skill tool now: `skill` with name
+       `finishing-a-development-branch`.
+
+       The branch's PR diff MUST contain the complete archived
+       cycle. If it doesn't (e.g., because retrospective or archive
+       was skipped), STOP and complete those first.
+
+       This is the canonical opening sequence for the PR — do NOT
+       reorder.
