@@ -43,6 +43,7 @@
 ## 仓库结构
 
 ```
+install.ps1                  # Windows 一键安装脚本（PowerShell 7+）
 superpowers-schema/
 ├── schema.yaml              # schema 定义（工件 + apply 阶段，机器可读）
 ├── VERSION                  # 1.2.0
@@ -86,6 +87,47 @@ docs/
 
 ## 安装
 
+### Windows（推荐）
+
+用仓库自带的 [`install.ps1`](./install.ps1)，一条命令完成 init + 复制 schema + 复制命令 + 设置默认 schema + 校验。
+
+```powershell
+# 在本仓库根目录运行
+.\install.ps1 -ProjectPath D:\code\my-app
+
+# 升级（覆盖旧版本，跳过 y/N 确认）
+.\install.ps1 -ProjectPath D:\code\my-app -Upgrade
+
+# 不带参数则交互式询问目标路径
+.\install.ps1
+```
+
+脚本会自动：
+
+1. 检查 openspec CLI ≥ 1.4.1
+2. 若目标项目未初始化 OpenSpec，自动跑 `openspec init --tools opencode`
+3. 复制 schema 到 `openspec/schemas/superpowers-schema`
+4. 复制 8 个补充命令到 `.opencode/commands/`
+5. 设置 `openspec/config.yaml` 的 `schema: superpowers-schema`
+6. 运行 `openspec schema validate` 校验
+
+> ⚠️ **脚本需要 PowerShell 7+**（开源跨平台版，不是 Windows 自带的 Windows PowerShell 5.1）。未安装时任选一种：
+>
+> | 方式 | 命令 / 链接 |
+> |---|---|
+> | winget | `winget install Microsoft.PowerShell` |
+> | MSI 安装包 | [GitHub Releases](https://github.com/PowerShell/PowerShell/releases)（选 `PowerShell-7.x.x-win-x64.msi`） |
+> | .NET 全局工具 | `dotnet tool install -g PowerShell` |
+> | Scoop | `scoop install pwsh` |
+>
+> 验证：`pwsh -Command '$PSVersionTable.PSVersion'` 应 ≥ 7.0。
+>
+> 如遇执行策略限制：`pwsh -ExecutionPolicy Bypass -File .\install.ps1`。
+
+### 通用（手动）
+
+适用 macOS / Linux / 不用脚本的 Windows。等价于 `install.ps1` 的逐步版本。
+
 ```bash
 # 1. 在项目里初始化 OpenSpec（OpenCode 模式）
 cd ~/your-project
@@ -109,10 +151,16 @@ openspec schema validate superpowers-schema
 ### 升级
 
 ```bash
+# 通用
 rm -rf openspec/schemas/superpowers-schema
 cp -R openspec-schemas/superpowers-schema openspec/schemas/superpowers-schema
 cp openspec-schemas/superpowers-schema/commands/*.md .opencode/commands/
 openspec schema validate superpowers-schema
+```
+
+```powershell
+# Windows（PowerShell 7+）
+.\install.ps1 -ProjectPath D:\code\my-app -Upgrade
 ```
 
 已归档的 change 不受影响。进行中的 change 如果缺工件，下一次 `/opsx-continue` 会自动补齐。
